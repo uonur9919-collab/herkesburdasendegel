@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch() 
+
 from flask import Flask, render_template_string, send_from_directory
 from flask_socketio import SocketIO
 import datetime
